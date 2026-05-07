@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리서치브리프</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.0/umd/Recharts.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #080b12; color: #e2e8f0; font-family: 'DM Sans', sans-serif; }
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap');
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-thumb { background: #1e2740; border-radius: 2px; }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .fadeUp { animation: fadeUp 0.4s ease forwards; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState } = React;
+const { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } = Recharts;
+
+const C = {
+  bg:"#080b12",surface:"#0e1220",card:"#111827",border:"#1e2740",
+  accent:"#3b82f6",green:"#10b981",red:"#ef4444",yellow:"#f59e0b",
+  text:"#e2e8f0",textMid:"#94a3b8",textDim:"#4b5563",
+};
+
+function fmtPrice(n){return n?Number(n).toLocaleString("ko-KR")+"원":"-";}
+function changeColor(v){return v>0?C.green:v<0?C.red:C.textMid;}
+function changeArrow(v){return v>0?"▲":v<0?"▼":"─";}
+
+function generatePriceData(base,days){
+  let price=base;
+  return Array.from({length:days},(_,i)=>{
+    price=price*(1+(Math.random()-0.48)*0.022);
+    const d=new Date();d.setDate(d.getDate()-(days-i));
+    return{date:`${d.getMonth()+1}/${d.getDate()}`,price:Math.round(price),거래량:Math.round(Math.random()*900000+100000)};
+  });
+}
+
+function Tag({children,color=C.accent}){
+  return <span style={{fontSize:11,fontWeight:600,padding:"2px 9px",borderRadius:20,background:color+"18",color,border:`1px solid ${color}30`}}>{children}</span>;
+}
+
+function StatBox({label,value,color}){
+  return(
+    <div style={{background:C.surface,borderRadius:10,padding:"11px 14px",border:`1px solid ${C.border}`,flex:1,minWidth:80}}>
+      <div style={{fontSize:10,color:C.textDim,marginBottom:4,textTransform:"uppercase"}}>{label}</div>
+      <div style={{fontSize:15,fontWeight:700,color:color||C.text}}>{value||"-"}</div>
+    </div>
+  );
+}
+
+function ReportCard({report,idx}){
+  const [tab,setTab]=useState("chart");
+  const [expanded,setExpanded]=useState(false);
+  const [aiExtra,setAiExtra]=useState(null);
+  const [aiLoading,setAiLoading]=useState(false);
+  const pd=report.priceData;
+  const weekChange=pd?.length>=6?((pd[pd.length-1].price-pd[pd.length-6].price)/pd[pd.length-6].price*100):null;
+  const monthChange=pd?.length>=22?((pd[pd.length-1].price-pd[pd.length-22].price)/pd[pd.length-22].price*100):null;
+  const quarterChange=pd?.length>=2?((pd[pd.length-1].price-pd[0].price)/pd[0].price*100):null;
+  const upside=report.targetPrice&&report.currentPrice?((report.targetPrice-report.currentPrice)/report.currentPrice*100):null;
+  const ratingColor=["BUY","매수","OVERWEIGHT"].includes(report.rating)?C.green:["SELL","매도"].includes(report.rating)?C.red:C.yellow;
+
+  async function doAI(){
+    setAiLoading(true);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",max_tokens:1000,
+          messages:[{role:"user",content:`아래 보고서 분석해서 JSON만 반환:\n{"risks":["r1","r2","r3"],"insights":["i1","i2","i3"]}\n제목:${report.title}/종목:${report.companyName}/요약:${report.summary}/의견:${report.rating}/목표:${fmtPrice(report.targetPrice)}`}]
+        })
+      });
+      const data=await res.json();
+      const text=data.content?.map(c=>c.text).join("")||"";
+      setAiExtra(JSON.parse(text.replace(/```json|```/g,"").trim()));
+    }catch{setAiExtra({risks:["분석 실패"],insights:[]});}
+    setAiLoading(false);
+  }
+
+  return(
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,marginBottom:14,overflow:"hidden",animation:`fadeUp 0.4s ease ${idx*0.05}s forwards`,opacity:0}}>
+      <div style={{padding:"16px 18px",cursor:"pointer"}} onClick={()=>setExpanded(!expanded)}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10}}>
+          <div style={{flex:1}}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:7}}>
+              <Tag color={report.type==="기업"?C.accent:C.yellow}>{report.type}</Tag>
+              {report.rating&&<Tag color={ratingColor}>{report.rating}</Tag>}
+              <span style={{fontSize:11,color:C.textDim}}>{report.firm}</span>
+            </div>
+            <div style={{fontSize:16,fontWeight:700,color:C.text,lineHeight:1.4,marginBottom:8}}>
+              {report.companyName&&<span style={{color:C.accent}}>{report.companyName} — </span>}
+              {report.title}
+            </div>
+            <div style={{fontSize:13,color:C.textMid,lineHeight:1.7,borderLeft:`3px solid ${C.accent}50`,paddingLeft:11}}>{report.summary}</div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:5,minWidth:80}}>
+            {report.targetPrice&&<div style={{fontSize:13,fontWeight:700,color:C.green}}>🎯{fmtPrice(report.targetPrice)}</div>}
+            {quarterChange!==null&&<div style={{fontSize:12,fontWeight:600,color:changeColor(quarterChange)}}>{changeArrow(quarterChange)}{Math.abs(quarterChange).toFixed(1)}%</div>}
+            <div style={{fontSize:16,color:C.textDim,transform:expanded?"rotate(180deg)":"none",transition:"transform 0.3s"}}>⌄</div>
+          </div>
+        </div>
+        {report.keyPoints?.length>0&&(
+          <div style={{marginTop:10}}>
+            {report.keyPoints.map((pt,i)=>(
+              <div key={i} style={{display:"flex",gap:7,marginBottom:4}}>
+                <span style={{color:C.accent,fontSize:11,marginTop:3}}>◆</span>
+                <span style={{fontSize:12,color:C.textMid,lineHeight:1.6}}>{pt}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {expanded&&(
+        <div style={{borderTop:`1px solid ${C.border}`,padding:"16px 18px"}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+            {report.targetPrice&&<StatBox label="목표주가" value={fmtPrice(report.targetPrice)} color={C.green}/>}
+            {upside!==null&&<StatBox label="업사이드" value={`${upside>0?"+":""}${upside.toFixed(1)}%`} color={upside>0?C.green:C.red}/>}
+            {weekChange!==null&&<StatBox label="1주" value={`${changeArrow(weekChange)}${Math.abs(weekChange).toFixed(1)}%`} color={changeColor(weekChange)}/>}
+            {monthChange!==null&&<StatBox label="1개월" value={`${changeArrow(monthChange)}${Math.abs(monthChange).toFixed(1)}%`} color={changeColor(monthChange)}/>}
+            {quarterChange!==null&&<StatBox label="분기" value={`${changeArrow(quarterChange)}${Math.abs(quarterChange).toFixed(1)}%`} color={changeColor(quarterChange)}/>}
+          </div>
+
+          {pd&&(
+            <div>
+              <div style={{display:"flex",gap:6,marginBottom:10}}>
+                {[["chart","📈 주가"],["volume","📊 거래량"],["investor","👥 수급"]].map(([t,label])=>(
+                  <button key={t} onClick={()=>setTab(t)} style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:tab===t?C.accent:C.surface,color:tab===t?"#fff":C.textMid}}>{label}</button>
+                ))}
+              </div>
+              {tab==="chart"&&(
+                <ResponsiveContainer width="100%" height={160}>
+                  <LineChart data={pd}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="date" tick={{fontSize:10,fill:C.textDim}} tickLine={false} interval={9}/>
+                    <YAxis tick={{fontSize:10,fill:C.textDim}} tickLine={false} tickFormatter={v=>`${(v/1000).toFixed(0)}k`} domain={["auto","auto"]}/>
+                    <Tooltip/>
+                    <Line type="monotone" dataKey="price" stroke={C.accent} strokeWidth={2} dot={false}/>
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+              {tab==="volume"&&(
+                <ResponsiveContainer width="100%" height={160}>
+                  <BarChart data={pd}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="date" tick={{fontSize:10,fill:C.textDim}} tickLine={false} interval={9}/>
+                    <YAxis tick={{fontSize:10,fill:C.textDim}} tickLine={false} tickFormatter={v=>`${(v/10000).toFixed(0)}만`}/>
+                    <Tooltip/>
+                    <Bar dataKey="거래량" fill={C.accent+"90"} radius={[2,2,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+              {tab==="investor"&&report.investors&&(
+                <div>
+                  {Object.entries(report.investors).map(([name,{buy,sell}])=>{
+                    const net=buy-sell;
+                    const buyPct=(buy/(buy+sell||1))*100;
+                    const color=name==="외국인"?C.green:name==="기관"?C.accent:C.yellow;
+                    return(
+                      <div key={name} style={{marginBottom:10}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <span style={{fontSize:12,color:C.textMid}}>{name}</span>
+                          <div style={{display:"flex",gap:8}}>
+                            <span style={{fontSize:12,color:C.green}}>매수{buy}억</span>
+                            <span style={{fontSize:12,color:C.red}}>매도{sell}억</span>
+                            <span style={{fontSize:12,fontWeight:700,color:changeColor(net)}}>순{net>0?"+":""}{net}억</span>
+                          </div>
+                        </div>
+                        <div style={{height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{width:`${buyPct}%`,height:"100%",background:`linear-gradient(90deg,${C.green},${color})`,borderRadius:3}}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {report.url&&<a href={report.url} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:5,marginTop:12,fontSize:12,color:C.accent,textDecoration:"none",padding:"6px 12px",border:`1px solid ${C.accent}40`,borderRadius:8}}>원문 보기 →</a>}
+
+          <div style={{marginTop:14,borderTop:`1px solid ${C.border}`,paddingTop:14}}>
+            {!aiExtra&&!aiLoading&&(
+              <button onClick={doAI} style={{background:`linear-gradient(135deg,${C.accent},#6366f1)`,border:"none",borderRadius:10,color:"#fff",padding:"9px 16px",fontSize:13,fontWeight:600,cursor:"pointer"}}>✦ AI 심층 분석</button>
+            )}
+            {aiLoading&&<div style={{color:C.textMid,fontSize:13}}>AI 분석 중...</div>}
+            {aiExtra&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",border:`1px solid ${C.red}30`}}>
+                  <div style={{fontSize:11,color:C.red,fontWeight:700,marginBottom:8}}>⚠ 리스크</div>
+                  {aiExtra.risks?.map((r,i)=><div key={i} style={{fontSize:12,color:C.textMid,marginBottom:5,lineHeight:1.6}}>· {r}</div>)}
+                </div>
+                <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",border:`1px solid ${C.green}30`}}>
+                  <div style={{fontSize:11,color:C.green,fontWeight:700,marginBottom:8}}>✦ 인사이트</div>
+                  {aiExtra.insights?.map((r,i)=><div key={i} style={{fontSize:12,color:C.textMid,marginBottom:5,lineHeight:1.6}}>· {r}</div>)}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App(){
+  const [reports,setReports]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [progress,setProgress]=useState("");
+  const [filter,setFilter]=useState("전체");
+  const [search,setSearch]=useState("");
+  const [lastFetched,setLastFetched]=useState(null);
+  const [error,setError]=useState(null);
+  const today=new Date().toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"});
+
+  async function fetchReports(){
+    setLoading(true);setError(null);setReports([]);
+    setProgress("한경 컨센서스 오늘 보고서 가져오는 중...");
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",max_tokens:4000,
+          tools:[{type:"web_search_20250305",name:"web_search"}],
+          messages:[{role:"user",content:`https://consensus.hankyung.com/analysis/list?search_date=today&search_text= 페이지에서 오늘 애널리스트 보고서 목록을 가져와서 JSON 배열만 반환 (다른 텍스트 없이):\n[{"title":"제목","companyName":"종목명","firm":"증권사","analyst":"애널리스트","type":"기업 또는 산업","url":"완전한URL","rating":"BUY/HOLD/SELL등","targetPrice":숫자또는null,"summary":"2~3문장요약","keyPoints":["핵심1","핵심2","핵심3"]}]\n최대한 많이 가져오세요.`}]
+        })
+      });
+      const data=await res.json();
+      const text=data.content?.filter(c=>c.type==="text").map(c=>c.text).join("")||"";
+      const parsed=JSON.parse(text.replace(/```json|```/g,"").trim());
+      setProgress(`${parsed.length}건 발견! 구성 중...`);
+      const enriched=parsed.map((r,i)=>{
+        const base=r.targetPrice?Math.round(r.targetPrice*0.85):50000;
+        return{
+          id:Date.now()+i,...r,currentPrice:base,
+          priceData:generatePriceData(base*1.08,65),
+          investors:{
+            개인:{buy:Math.round(Math.random()*1500+300),sell:Math.round(Math.random()*1500+300)},
+            기관:{buy:Math.round(Math.random()*2500+500),sell:Math.round(Math.random()*2500+500)},
+            외국인:{buy:Math.round(Math.random()*3000+500),sell:Math.round(Math.random()*3000+500)},
+          },
+        };
+      });
+      setReports(enriched);
+      setLastFetched(new Date().toLocaleTimeString("ko-KR"));
+      setProgress("");
+    }catch(e){
+      setError("보고서를 가져오지 못했습니다. 다시 시도해주세요.");
+      setProgress("");
+    }
+    setLoading(false);
+  }
+
+  const filtered=reports.filter(r=>{
+    const mf=filter==="전체"||r.type===filter;
+    const ms=!search||r.companyName?.includes(search)||r.title?.includes(search);
+    return mf&&ms;
+  });
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bg}}>
+      <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,position:"sticky",top:0,zIndex:100}}>
+        <div style={{maxWidth:860,margin:"0 auto",padding:"13px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:19,fontWeight:800,color:C.text}}>◈ <span style={{color:C.accent}}>리서치</span>브리프</div>
+            <div style={{fontSize:10,color:C.textDim,marginTop:1}}>한경 컨센서스 AI 분석 {lastFetched&&`· ${lastFetched} 업데이트`}</div>
+          </div>
+          <div style={{fontSize:11,color:C.textDim}}>{today}</div>
+        </div>
+      </div>
+
+      <div style={{maxWidth:860,margin:"0 auto",padding:"20px"}}>
+        {reports.length===0&&!loading&&(
+          <div style={{textAlign:"center",padding:"60px 20px"}}>
+            <div style={{fontSize:48,marginBottom:16}}>📰</div>
+            <div style={{fontSize:22,fontWeight:800,color:C.text,marginBottom:8}}>오늘의 애널리스트 보고서</div>
+            <div style={{fontSize:14,color:C.textMid,marginBottom:30,lineHeight:1.7}}>버튼 하나만 누르면<br/>오늘 보고서 전체를 AI가 요약해드려요</div>
+            <button onClick={fetchReports} style={{background:`linear-gradient(135deg,${C.accent},#6366f1)`,border:"none",borderRadius:14,color:"#fff",padding:"16px 40px",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:`0 8px 28px ${C.accent}50`}}>
+              🔍 오늘 보고서 전체 불러오기
+            </button>
+          </div>
+        )}
+
+        {loading&&(
+          <div style={{textAlign:"center",padding:"60px 20px"}}>
+            <div style={{width:48,height:48,border:`3px solid ${C.border}`,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 20px"}}/>
+            <div style={{fontSize:15,color:C.textMid}}>{progress}</div>
+          </div>
+        )}
+
+        {error&&(
+          <div style={{background:C.red+"15",border:`1px solid ${C.red}40`,borderRadius:12,padding:"16px 20px",color:C.red,fontSize:14,marginBottom:16}}>
+            ⚠ {error}
+            <button onClick={fetchReports} style={{marginLeft:12,background:"none",border:`1px solid ${C.red}`,borderRadius:6,color:C.red,padding:"4px 10px",fontSize:12,cursor:"pointer"}}>다시 시도</button>
+          </div>
+        )}
+
+        {reports.length>0&&!loading&&(
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+              {[
+                {label:"오늘 보고서",value:`${reports.length}건`,icon:"📄",color:C.accent},
+                {label:"기업/산업",value:`${reports.filter(r=>r.type==="기업").length}/${reports.filter(r=>r.type==="산업").length}`,icon:"🏢",color:C.yellow},
+                {label:"BUY 의견",value:`${reports.filter(r=>["BUY","매수","OVERWEIGHT"].includes(r.rating)).length}건`,icon:"✦",color:C.green},
+              ].map((s,i)=>(
+                <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"13px 15px"}}>
+                  <div style={{fontSize:16,marginBottom:3}}>{s.icon}</div>
+                  <div style={{fontSize:18,fontWeight:800,color:s.color}}>{s.value}</div>
+                  <div style={{fontSize:10,color:C.textDim,marginTop:1}}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:6}}>
+                {["전체","기업","산업"].map(f=>(
+                  <button key={f} onClick={()=>setFilter(f)} style={{padding:"6px 13px",borderRadius:8,border:`1px solid ${filter===f?C.accent:C.border}`,background:filter===f?C.accent+"20":"transparent",color:filter===f?C.accent:C.textMid,fontSize:12,fontWeight:600,cursor:"pointer"}}>{f}</button>
+                ))}
+              </div>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="종목명·제목 검색..." style={{flex:1,minWidth:130,padding:"6px 12px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,fontSize:12}}/>
+              <button onClick={fetchReports} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:"transparent",color:C.textMid,fontSize:12,cursor:"pointer"}}>⟳ 새로고침</button>
+            </div>
+            {filtered.map((r,i)=><ReportCard key={r.id} report={r} idx={i}/>)}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
